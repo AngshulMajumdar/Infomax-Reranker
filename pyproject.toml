@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "infomax-reranker"
+version = "0.1.0"
+description = "Information-maximising passage selection over a retrieved candidate pool"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "Angshul Majumdar", email = "angshul@iiitd.ac.in" }]
+dependencies = ["numpy>=1.22", "scipy>=1.8"]
+
+[project.optional-dependencies]
+neural = ["sentence-transformers>=3.0", "torch"]
+bench = ["sentence-transformers>=3.0", "torch", "pytrec_eval-terrier", "nltk", "scikit-learn"]
+test = ["pytest"]
+
+[project.scripts]
+infomax-rerank = "infomax_reranker.cli:main"
+
+[tool.setuptools]
+packages = ["infomax_reranker"]
