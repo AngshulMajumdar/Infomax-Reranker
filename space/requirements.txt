@@ -1,0 +1,6 @@
+torch
+sentence-transformers>=3.0
+numpy
+scipy
+pandas
+spaces

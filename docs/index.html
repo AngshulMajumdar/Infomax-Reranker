@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reranking as Information Maximisation</title>
+<meta name="description" content="Choosing retrieved passages by how much they reduce uncertainty about the query, with no LLM in the loop">
+<meta name="author" content="Angshul Majumdar">
+<meta property="og:title" content="Reranking as Information Maximisation">
+<meta property="og:description" content="Choosing retrieved passages by how much they reduce uncertainty about the query, with no LLM in the loop">
+<meta property="og:type" content="article">
+<meta property="og:image" content="images/01-pipeline.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<article>
+<h1>Reranking as Information Maximisation</h1>
+<h2>Choosing retrieved passages by how much they reduce uncertainty about the query, with no LLM in the loop</h2>
+<p><em>Angshul Majumdar</em></p>
+<p>Retrieval-augmented generation is usually a two-stage process. A retriever pulls a pool of candidate passages, then a reranker puts them in order, and the top few go into the prompt. The standard reranker is a cross-encoder: it reads the query and one passage together and returns a relevance score. It does this for each passage independently.</p>
+<p>Independent scoring has a blind spot. A reranker never asks what a passage adds <em>given the passages already chosen</em>. Two near-identical passages both get high scores, and a passage that covers an aspect of the query that nothing else covers gets no credit for that.</p>
+<p>InfoMax is a small, model-free selector that sits after any reranker. It treats each passage as a noisy measurement of what the query needs, and picks passages one at a time to maximise the information they add. It needs no training and no language-model calls, and on CPU it costs about 3 milliseconds per query.</p>
+<figure><img src="images/01-pipeline.png" alt="InfoMax pipeline. Two frozen MiniLM models score the candidate pool once; selection runs on those scores."><figcaption>InfoMax pipeline. Two frozen MiniLM models score the candidate pool once; selection runs on those scores.</figcaption></figure>
+<h2>The problem with probabilities</h2>
+<p>"Pick the passage that most reduces uncertainty" sounds like it needs probabilities: the probability of the right answer given a set of passages. Without an LLM in the loop, those numbers don't exist.</p>
+<p>The way around this is a Gaussian surrogate. In a linear-Gaussian model, the posterior covariance, and therefore the entropy, depends only on <em>which</em> observations you make, not on their values. So the entropy can be computed from the geometry of the embeddings and the relevance scores alone.</p>
+<figure><img src="images/02-model.png" alt="The surrogate model. Each passage is a noisy linear measurement of the query's information need z; a shared nuisance u correlates passages with similar off-query content."><figcaption>The surrogate model. Each passage is a noisy linear measurement of the query's information need z; a shared nuisance u correlates passages with similar off-query content.</figcaption></figure>
+<h2>The model</h2>
+<p>For one query with candidates 1 to n:</p>
+<ul>
+<li><strong>Relevance.</strong> rⱼ is the cross-encoder score, or for InfoMax+F a z-score blend of the cross-encoder score and the dense cosine. The weight is wⱼ = minmax(r)ⱼ^γ.</li>
+<li><strong>Geometry.</strong> eⱼ is the all-MiniLM-L6-v2 embedding, centred on the pool mean.</li>
+<li><strong>Target.</strong> z is a latent vector of query aspects on a small basis U: the query direction plus the top relevance-weighted directions of the pool.</li>
+<li><strong>Observation.</strong> yⱼ = √wⱼ (Uᵀeⱼ)ᵀ z + gⱼᵀ u + εⱼ, where gⱼ = (I − UUᵀ)eⱼ is the off-query part of the passage.</li>
+<li><strong>Correlated noise.</strong> u is shared across passages. Near-duplicates and passages from the same source therefore have correlated errors and explain each other away.</li>
+</ul>
+<p>Each greedy step adds the passage with the largest conditional mutual information:</p>
+<blockquote>
+<p>I(z; yⱼ | y_S) = ½ log [ Var(yⱼ | y_S) / Var(yⱼ | y_S, z) ]</p>
+</blockquote>
+<p>Both variances are Schur complements, so each step is exact and costs O(n²).</p>
+<p>Two safeguards keep the selector close to the reranker it builds on:</p>
+<ul>
+<li><strong>Anchoring.</strong> The first pick is always the reranker's top passage. Afterwards, the reranker's next passage is replaced only if the best gain beats its gain by a factor of (1 + δ). With δ = ∞ the output is exactly the reranker's ranking.</li>
+<li><strong>Adaptive K.</strong> Selection stops when the best gain drops below a threshold τ, so each query gets its own number of passages.</li>
+</ul>
+<p>No approximation guarantee is claimed. With independent noise the objective would be submodular and greedy would be within (1 − 1/e) of the optimum, but passages are not independent, and correlated noise breaks that property. The model was chosen to be right rather than provable.</p>
+<h2>Experimental setup</h2>
+<ul>
+<li><strong>Data.</strong> Five BEIR datasets: SciFact, NFCorpus, FiQA, SciDocs and TREC-COVID, 2,321 test queries in all.</li>
+<li><strong>Candidates.</strong> BM25 top-50 per query (k1 = 0.9, b = 0.4, Porter stemming). BM25 nDCG@10 is within about 0.01 of the published BEIR numbers on all five datasets.</li>
+<li><strong>Models.</strong> The standard reranker is cross-encoder/ms-marco-MiniLM-L6-v2. Embeddings come from sentence-transformers/all-MiniLM-L6-v2.</li>
+<li><strong>Tuning.</strong> Every setting was tuned once, on dev queries only (SciFact train, NFCorpus dev, FiQA dev, 200 queries each). One setting per method was then applied unchanged to all five test sets.</li>
+</ul>
+<h2>Results</h2>
+<figure><img src="images/04-ndcg.png" alt="nDCG@10 for the MS MARCO cross-encoder, InfoMax with cross-encoder relevance, and InfoMax+F."><figcaption>nDCG@10 for the MS MARCO cross-encoder, InfoMax with cross-encoder relevance, and InfoMax+F.</figcaption></figure>
+<p>InfoMax+F has the highest nDCG@10 of the three methods on all five datasets:</p>
+<ul>
+<li>SciFact: 0.716 vs 0.676 for the cross-encoder</li>
+<li>NFCorpus: 0.352 vs 0.346</li>
+<li>FiQA: 0.358 vs 0.322</li>
+<li>SciDocs: 0.194 vs 0.164</li>
+<li>TREC-COVID: 0.790 vs 0.744</li>
+</ul>
+<p>MRR@10 and Recall@10 follow the same pattern. The exception is NFCorpus MRR, where the cross-encoder alone is slightly better.</p>
+<p>The honest part is the next figure.</p>
+<figure><img src="images/05-confidence-intervals.png" alt="Paired bootstrap 95% intervals. Left: InfoMax+F minus the cross-encoder. Right: InfoMax+F minus the same fused relevance ranked without selection."><figcaption>Paired bootstrap 95% intervals. Left: InfoMax+F minus the cross-encoder. Right: InfoMax+F minus the same fused relevance ranked without selection.</figcaption></figure>
+<p>Against the cross-encoder, 12 of the 15 dataset-metric intervals lie above zero. Against Fusion, which is the same blended relevance ranked without set selection, every interval contains zero.</p>
+<p>On these single-hop benchmarks the improvement comes from the better relevance signal, not from the selection. That is what the metrics allow: nDCG, MRR and Recall never penalise a redundant passage, so a selector that avoids redundancy has nothing to gain on them. A fair test of the selection itself needs a redundancy-aware metric, or answer quality from a fixed reader at a small context budget.</p>
+<h2>How many passages are enough?</h2>
+<figure><img src="images/03-information-gain.png" alt="Median information gain per greedy step on each dataset."><figcaption>Median information gain per greedy step on each dataset.</figcaption></figure>
+<p>The per-step gain is a useful signal on its own. Over ten steps it falls by about 1,000× on SciFact and NFCorpus, but only by about 8× on TREC-COVID. A threshold τ on the gain turns this into a context size for each query, instead of a fixed top-K.</p>
+<h2>Cost</h2>
+<figure><img src="images/06-cost.png" alt="Median CPU time per query on FiQA, log scale."><figcaption>Median CPU time per query on FiQA, log scale.</figcaption></figure>
+<p>Selection takes 3.1 ms per query on two CPU threads, about 500 times less than cross-encoder scoring of the same 50 candidates. Passage embeddings are normally computed once, at index time, by any dense or hybrid retriever.</p>
+<h2>Use it</h2>
+<pre><code>pip install &quot;infomax-reranker[neural] @ git+https://github.com/AngshulMajumdar/infomax-reranker&quot;
+</code></pre>
+<pre><code class="language-python">from infomax_reranker import InfoMaxReranker
+
+rr = InfoMaxReranker()
+top = rr.rerank(&quot;what causes tides?&quot;, passages, k=5)             # InfoMax+F, dev-tuned settings
+top = rr.rerank(&quot;what causes tides?&quot;, passages, k=10, tau=0.05)  # adaptive K
+</code></pre>
+<p>If you already have reranker scores and embeddings, the selector needs only numpy and scipy:</p>
+<pre><code class="language-python">from infomax_reranker import infomax_select
+
+selected, gains = infomax_select(scores, passage_embeddings, query_embedding, k=10, tau=0.05)
+</code></pre>
+<p>A command-line tool is included as well: <code>infomax-rerank --query "..." --passages passages.txt --k 5</code>.</p>
+<h2>Limitations</h2>
+<ul>
+<li>The entropy is that of a Gaussian surrogate, not of a language model's answer. The surrogate's usefulness is an empirical question, settled here only for retrieval metrics.</li>
+<li>The dev-tuned settings favour relevance, because the tuning metric does not reward diversity, and near-paraphrases can still both be selected. The trade-off is set by γ (how sharply relevance is weighted) and β (the strength of the shared noise). Both were tuned only for nDCG.</li>
+<li>The base models are small MiniLM models. A stronger cross-encoder raises every row, including InfoMax's.</li>
+</ul>
+<h2>Related work</h2>
+<p>Selecting data to reduce posterior uncertainty about a model's response to a prompt is the idea behind SIFT (Hübotter, Bongni, Hakimi and Krause, ICLR 2025), which selects fine-tuning data at test time. InfoMax applies a related criterion to selecting RAG context, with correlated noise, anchoring to a reranker, and a gain threshold for adaptive K. Maximal Marginal Relevance (Carbonell and Goldstein, 1998) is the classical heuristic for relevance against redundancy.</p>
+<h2>Reproduce</h2>
+<p>Code, benchmark scripts, per-dataset results and these figures are in the repository: <a href="https://github.com/AngshulMajumdar/infomax-reranker">github.com/AngshulMajumdar/infomax-reranker</a>. The <code>benchmark/</code> folder rebuilds every number in this article from the public BEIR files and the two public models.</p>
+</article>
+</body>
+</html>

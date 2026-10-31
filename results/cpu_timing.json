@@ -1,0 +1,6 @@
+{
+ "ce_ms": 1544.069721000014,
+ "dense_ms": 2050.3296204999942,
+ "select_ms": 3.095891174999821,
+ "note": "FiQA test, 20 queries, 50 candidates, K=10, 2 CPU threads, median ms/query"
+}

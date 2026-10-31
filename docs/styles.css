@@ -1,0 +1,22 @@
+:root { --ink: #0b0b0b; --ink2: #52514e; --muted: #898781; --rule: #e1e0d9; --accent: #2a78d6; --code: #f3f2ee; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #fcfcfb; color: var(--ink);
+       font: 19px/1.65 Charter, "Bitstream Charter", Georgia, "Times New Roman", serif; }
+article { max-width: 720px; margin: 0 auto; padding: 56px 24px 96px; }
+h1, h2, h3 { font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.2; letter-spacing: -0.01em; }
+h1 { font-size: 40px; margin: 0 0 8px; }
+h1 + h2 { font-size: 22px; font-weight: 400; color: var(--ink2); margin: 0 0 20px; }
+h2 { font-size: 26px; margin: 44px 0 12px; }
+h3 { font-size: 21px; margin: 32px 0 8px; }
+p, ul { margin: 0 0 20px; }
+li { margin: 4px 0; }
+a { color: var(--accent); }
+em { color: var(--ink2); }
+blockquote { margin: 24px 0; padding: 4px 0 4px 20px; border-left: 3px solid var(--ink); font-style: italic; }
+figure { margin: 32px -60px; }
+figure img { width: 100%; height: auto; display: block; border-radius: 6px; }
+figcaption { font: 14px/1.5 Inter, system-ui, sans-serif; color: var(--muted); text-align: center; margin-top: 10px; padding: 0 60px; }
+pre { background: var(--code); padding: 16px 18px; border-radius: 6px; overflow-x: auto; font-size: 15px; line-height: 1.5; }
+code { font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: 0.85em; background: var(--code); padding: 1px 4px; border-radius: 3px; }
+pre code { background: none; padding: 0; font-size: inherit; }
+@media (max-width: 860px) { figure { margin: 28px 0; } figcaption { padding: 0; } body { font-size: 18px; } h1 { font-size: 32px; } }
